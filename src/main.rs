@@ -317,7 +317,7 @@ impl<'a> ExprType<'a> {
 /// ```ignore
 /// expr        => assignment 
 /// assignment  => var "=" fun_call | fun_call
-/// fun_call    => term "(" expr ("," expr )* ")" | term
+/// fun_call    => (var | fun_call) "(" expr ("," expr )* ")" | term
 /// term        => factor (("+" | "-") term)
 /// factor      => primary (("*" | "/") factor)
 /// primary     => num | str | var | "(" num | fun_call | term | factor ")" | "void"
@@ -347,7 +347,8 @@ enum ExprParsingErrorType {
     PrimaryExprExpected(String),
     CannotAssignToNonVar(String),
     UnexpectedToken(String),
-    CanNotNest(String),
+    CannotNest(String),
+    CannotUseAsFunCall(String),
 }
 
 #[derive(Debug)]
@@ -376,8 +377,11 @@ impl std::fmt::Display for ExprParsingError<'_> {
             ExprParsingErrorType::CannotAssignToNonVar(string) => {
                 writeln!(f, "  Can not assign to a {}", string)
             }
-            ExprParsingErrorType::CanNotNest(string) => {
+            ExprParsingErrorType::CannotNest(string) => {
                 writeln!(f, "  Can not nest {}", string)
+            }
+            ExprParsingErrorType::CannotUseAsFunCall(string) => {
+                writeln!(f, "  Can not call a an expression with the type {}", string)
             }
         }
     }
@@ -484,7 +488,7 @@ impl<'a> Expr<'a> {
                         },
                         
                         ExprType::Void | ExprType::Var(_) | ExprType::Str(_) | ExprType::Assignment(_, _) => {
-                            Err(ExprParsingError { err_type: ExprParsingErrorType::CanNotNest(expr.expr_type.to_string()), loc: expr.loc })
+                            Err(ExprParsingError { err_type: ExprParsingErrorType::CannotNest(expr.expr_type.to_string()), loc: expr.loc })
                         },
                     }
                 }
@@ -619,6 +623,13 @@ impl<'a> Expr<'a> {
     fn parse_fun_call(lexer: &mut Peekable<Lexer<'a>>) -> Result<Expr<'a>, ExprParsingError<'a>> {
         let expr = Expr::parse_term(lexer)?;
         if lexer.peek().is_some() && lexer.peek().unwrap().token_type == TokenType::LeftParen {
+            match expr.expr_type {
+                ExprType::Void | ExprType::Num(_) | ExprType::Str(_) | ExprType::Plus(_, _) | ExprType::Minus(_, _) | ExprType::Multiply(_, _) | ExprType::Divide(_, _) | ExprType::Assignment(_, _) => {
+                    return Err(ExprParsingError { err_type: ExprParsingErrorType::CannotUseAsFunCall(expr.expr_type.to_string()), loc: expr.loc })
+                },
+                
+                _ => (),
+            }
             lexer.next(); // left paren (
             let mut args = vec![];
             if let Some(nt) = lexer.peek() {
